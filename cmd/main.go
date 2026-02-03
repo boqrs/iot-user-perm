@@ -5,7 +5,6 @@ import (
 	"log"
 
 	"github.com/boqrs/iot-user-perm/bootstrap"
-	//"github.com/boqrs/iot-user-srv/bootstrap"
 	"github.com/boqrs/iot-user-perm/config"
 	"github.com/boqrs/zeus"
 	"github.com/boqrs/zeus/cmd"

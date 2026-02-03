@@ -35,7 +35,6 @@ func (h *Handler) RouterRegister() {
 	group.Handle(http.MethodPost, "/xiling/admin/user/password/update", h.passwordUpdate)
 	group.Handle(http.MethodGet, "/xiling/admin/user/list", h.adminList)
 	group.Handle(http.MethodGet, "/xiling/admin/user/log_list", h.logList)
-	//group.Handle(http.MethodPost, "/xiling/admin/user/log_export", h.active) 日志导出功能暂时不开放，后续再说
 
 	group.Handle(http.MethodGet, "/xiling/admin/user/role_perm/:roleCode", h.GetRolePerm)
 	group.Handle(http.MethodPost, "/xiling/admin/user/role_perm/bind", h.addRolePerm)

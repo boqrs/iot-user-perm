@@ -35,6 +35,12 @@ type RolePermResp struct {
 	PermList []model.PermissionRoleApi `json:"perm_list"`
 }
 
+type IotRolePermResp struct {
+	IdentityCode string                `json:"identity_code"`
+	IdentityName string                `json:"identity_name"`
+	PermList     []model.PermissionApi `json:"perm_list"`
+}
+
 type AddApiPermResp struct {
 	PermID   string `json:"perm_id"`
 	PermName string `json:"perm_name"`

@@ -3,6 +3,7 @@ package admin
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/boqrs/iot-user-perm/pkg/comm"
@@ -100,7 +101,7 @@ func (s *service) logList(req *LogListReq) (*LogListResp, error) {
 		return nil, err
 	}
 
-	var detail []*model.PermissionOperationLog
+	var detail []model.PermissionOperationLog
 	var offset = (req.CurrentPage - 1) * req.PageSize
 	if err := q.Offset(offset).Limit(req.PageSize).Find(&detail).Error; err != nil {
 		s.l.Errorf("failed to find logs, user: %s, req: %#v, error: %s", req, err.Error())
@@ -268,7 +269,7 @@ func (s *service) BindRolePerms(roleCode string, permIDs []string) error {
 		return errors.New("the role code or permission ID list cannot be empty")
 	}
 
-	if err := s.db.Model(&model.PermissionRoleApi{}).Where("role_code = ?", roleCode).Delete().Error; err != nil {
+	if err := s.db.Model(&model.PermissionRoleApi{}).Where("role_code = ?", roleCode).Delete(&model.PermissionRoleApi{}).Error; err != nil {
 		return errors.New("删除原有权限绑定失败：" + err.Error())
 	}
 
@@ -299,7 +300,7 @@ func (s *service) CheckApiUnique(apiType, apiPath, apiMethod string) (bool, erro
 	}
 
 	var count int64
-	err := s.db.Model(&model.PermissionIotIdentityApi{}).
+	err := s.db.Model(&model.PermissionApi{}).
 		Where("api_type = ? AND api_path = ? AND api_method = ?", apiType, apiPath, apiMethod).
 		Count(&count).Error
 
@@ -378,4 +379,142 @@ func (s *service) CheckApiUniqueExceptSelf(permID, apiType, apiPath, apiMethod s
 		return false, err
 	}
 	return count > 0, nil
+}
+
+func (s *service) CheckIdentityExist(identityCode string) (bool, error) {
+	// 1. 参数校验
+	if identityCode == "" {
+		return false, errors.New("IoT identity code must be provided")
+	}
+
+	// 2. 查询数据库校验存在性
+	var count int64
+	err := s.db.Model(&model.PermissionIotIdentity{}).
+		Where("identity_code = ?", identityCode).
+		Count(&count).Error
+
+	if err != nil {
+		return false, errors.New("Failed to verify IoT identity code：" + err.Error())
+	}
+
+	// 3. 返回结果：存在则true，否则false
+	return count > 0, nil
+}
+func (s *service) GetIdentityPerms(identityCode string) ([]model.PermissionApi, error) {
+	// 1. 严格参数校验
+	if identityCode == "" {
+		return nil, errors.New("IoT身份编码不能为空")
+	}
+
+	// 2. 联表查询：仅返回有效（未删除）的IOT类型API权限
+	var perms []model.PermissionApi
+	err := s.db.Table("permission_api a").
+		// 关联IoT身份-权限绑定表，仅取未删除的绑定记录
+		Joins("JOIN permission_iot_identity_api ia ON a.perm_id = ia.perm_id AND ia.deleted_at IS NULL").
+		// 核心约束：仅返回IOT类型的API
+		Where("a.api_type = ? AND a.deleted_at IS NULL", "IOT").
+		// 筛选指定IoT身份
+		Where("ia.identity_code = ?", identityCode).
+		// 字段映射（避免冗余）
+		Select("a.perm_id, a.perm_name, a.api_type, a.api_path, a.api_method, a.remark, a.create_time").
+		Find(&perms).Error
+
+	// 3. 精准错误处理
+	if err != nil {
+		// 数据库执行错误（如连接异常、SQL语法错误）
+		return nil, errors.New("Failed to verify IoT identity code：" + err.Error())
+	}
+
+	// 4. 无绑定权限时返回空切片（而非错误），便于上层判断
+	if len(perms) == 0 {
+		return []model.PermissionApi{}, nil
+	}
+
+	return perms, nil
+}
+
+func (s *service) GetIdentityName(identityCode string) string {
+	if identityCode == "" {
+		return ""
+	}
+
+	var identity model.PermissionIotIdentity
+	s.db.Where("identity_code = ?", identityCode).First(&identity)
+	return identity.IdentityName
+}
+
+func (s *service) CheckIotPermIDsExist(permIDs []string) (bool, []string, []string) {
+	// ========== 步骤1：极致严谨的参数校验 ==========
+	// 1.1 空切片直接返回“不存在”
+	if len(permIDs) == 0 {
+		return false, []string{}, []string{}
+	}
+
+	// 1.2 过滤空字符串的权限ID（避免无效查询）
+	var validPermIDs []string // 非空的权限ID
+	var emptyPermIDs []string // 空字符串的权限ID
+	for _, pid := range permIDs {
+		trimmedPID := strings.TrimSpace(pid)
+		if trimmedPID == "" {
+			emptyPermIDs = append(emptyPermIDs, pid) // 记录空值，归入invalidPerms
+		} else {
+			validPermIDs = append(validPermIDs, trimmedPID)
+		}
+	}
+
+	// ========== 步骤2：查询数据库中【有效（未删除）的IOT类型API权限ID】 ==========
+	var dbPermList []struct {
+		PermID  string `gorm:"perm_id"` // 仅查询需要的字段，提升性能
+		ApiType string `gorm:"api_type"`
+	}
+
+	// 2.1 执行查询：仅查未删除的、IOT类型的API
+	err := s.db.Model(&model.PermissionApi{}).
+		Select("perm_id, api_type").                                // 显式指定字段，避免冗余
+		Where("perm_id IN ? AND deleted_at IS NULL", validPermIDs). // 仅查未删除的API
+		Find(&dbPermList).Error
+
+	// 2.2 数据库查询错误处理（区分“查询失败”和“无匹配数据”）
+	if err != nil {
+		// 数据库错误时，所有validPermIDs都视为invalid，emptyPermIDs也归入invalid
+		invalidPerms := append(emptyPermIDs, validPermIDs...)
+		return false, invalidPerms, []string{}
+	}
+
+	// ========== 步骤3：分类整理结果 ==========
+	// 3.1 构建有效IOT权限ID的映射表
+	iotPermMap := make(map[string]bool)      // key: 有效IOT类型的permID
+	nonIotPermMap := make(map[string]string) // key: 存在但非IOT的permID, value: 实际ApiType
+	for _, item := range dbPermList {
+		if item.ApiType == "IOT" {
+			iotPermMap[item.PermID] = true
+		} else {
+			nonIotPermMap[item.PermID] = item.ApiType
+		}
+	}
+
+	// 3.2 分类：invalidPerms（不存在/已删除/空值）、nonIotPerms（存在但非IOT）
+	var invalidPerms []string
+	var nonIotPerms []string
+
+	// 先处理空值的权限ID
+	invalidPerms = append(invalidPerms, emptyPermIDs...)
+
+	// 再处理非空的权限ID
+	for _, pid := range validPermIDs {
+		if _, isIot := iotPermMap[pid]; isIot {
+			continue // 有效IOT权限ID，无需处理
+		} else if apiType, exists := nonIotPermMap[pid]; exists {
+			// 存在但非IOT类型
+			nonIotPerms = append(nonIotPerms, fmt.Sprintf("%s（实际类型：%s）", pid, apiType))
+		} else {
+			// 不存在 或 已被逻辑删除
+			invalidPerms = append(invalidPerms, pid)
+		}
+	}
+
+	// 3.3 判断最终结果：仅当invalidPerms和nonIotPerms都为空时，exist才为true
+	exist := len(invalidPerms) == 0 && len(nonIotPerms) == 0
+
+	return exist, invalidPerms, nonIotPerms
 }

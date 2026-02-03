@@ -26,11 +26,11 @@ CREATE TABLE IF NOT EXISTS permission_role (
     create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (role_code)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='角色表';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='角色表';
 
 INSERT INTO permission_role (role_code, role_name, remark) VALUES
-                                                               ('SUPER_ADMIN', '超级管理员', '全权限'),
-                                                               ('ADMIN', '管理员', '仅IOT权限配置');
+('SUPER_ADMIN', '超级管理员', '全权限'),
+('ADMIN', '管理员', '仅IOT权限配置');
 
 -- 3. API权限表
 CREATE TABLE IF NOT EXISTS permission_api (
@@ -48,8 +48,8 @@ CREATE TABLE IF NOT EXISTS permission_api (
 
 -- 4. 角色-API权限绑定表
 CREATE TABLE IF NOT EXISTS permission_role_api (
-                                                   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
-                                                   role_code VARCHAR(32) NOT NULL COMMENT '角色编码',
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+    role_code VARCHAR(32) NOT NULL COMMENT '角色编码',
     perm_id VARCHAR(64) NOT NULL COMMENT '权限ID',
     create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
@@ -67,14 +67,14 @@ CREATE TABLE IF NOT EXISTS permission_iot_identity (
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='IOT身份表';
 
 INSERT INTO permission_iot_identity (identity_code, identity_name, remark) VALUES
-                                                                               ('OWNER', '拥有者', '设备全权限'),
-                                                                               ('COMMAND', '控制者', '查看+控制'),
-                                                                               ('VIEWER', '访客', '仅查看');
+('OWNER', '拥有者', '设备全权限'),
+('COMMAND', '控制者', '查看+控制'),
+('VIEWER', '访客', '仅查看');
 
 -- 6. IOT身份-API权限绑定表
 CREATE TABLE IF NOT EXISTS permission_iot_identity_api (
-                                                           id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
-                                                           identity_code VARCHAR(32) NOT NULL COMMENT 'IOT身份编码',
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+    identity_code VARCHAR(32) NOT NULL COMMENT 'IOT身份编码',
     perm_id VARCHAR(64) NOT NULL COMMENT '权限ID（仅IOT类型）',
     create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
@@ -108,4 +108,4 @@ CREATE TABLE IF NOT EXISTS permission_api (
     update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (perm_id),
     UNIQUE KEY uk_api (api_type, api_path, api_method)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='API权限表';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='API权限表';

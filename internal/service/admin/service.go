@@ -3,6 +3,7 @@ package admin
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/boqrs/comm/database/cache"
 	"github.com/boqrs/iot-user-perm/config"
@@ -471,6 +472,102 @@ func (s *service) DelApiPerm(ctx *gin.Context, permId string) error {
 		OperatorID:   operatorID,
 		OperatorName: operatorName,
 		OperType:     "delete api perm",
+		OperContent:  fmt.Sprintf("api：%s", permId),
+		OperIP:       ctx.ClientIP(),
+		OperResult:   "success",
+	}); err != nil {
+		s.l.Errorf("failed to save oplog, error: %s", err.Error())
+	}
+
+	return nil
+}
+
+func (s *service) IOTRolePerm(ctx *gin.Context, identityCode string) (*IotRolePermResp, error) {
+	exist, err := s.CheckIdentityExist(identityCode)
+	if err != nil {
+		return nil, err
+	}
+	if !exist {
+		return nil, errors.New("identity not existed")
+	}
+
+	perms, err := s.GetIdentityPerms(identityCode)
+	if err != nil {
+		return nil, err
+	}
+
+	return &IotRolePermResp{
+		IdentityCode: identityCode,
+		IdentityName: s.GetIdentityName(identityCode),
+		PermList:     perms,
+	}, nil
+
+}
+
+func (s *service) IotApiPermBind(ctx *gin.Context, req *BindIotIdentityPermReq) error {
+	exist, err := s.CheckIdentityExist(req.IdentityCode)
+	if err != nil {
+		return err
+	}
+	if !exist {
+		return errors.New("identity not existed")
+	}
+
+	exist, invalidPerms, nonIotPerms := s.CheckIotPermIDsExist(req.PermissionIds)
+	if !exist {
+		s.l.Errorf("perm id not existed: " + strings.Join(invalidPerms, ","))
+		return errors.New("perm id not existed")
+	}
+	if len(nonIotPerms) > 0 {
+		s.l.Errorf("perm type is not iot: " + strings.Join(nonIotPerms, ","))
+		return errors.New("perm type error")
+	}
+
+	iotapis := make([]model.PermissionIotIdentityApi, 0)
+	for _, perm := range invalidPerms {
+		iotapis = append(iotapis, model.PermissionIotIdentityApi{
+			IdentityCode: req.IdentityCode,
+			PermID:       perm,
+		})
+	}
+
+	if err = s.db.Model(&model.PermissionIotIdentity{}).CreateInBatches(iotapis, len(iotapis)).Error; err != nil {
+		s.l.Errorf("failed to batch create iot apis, error: %s", err.Error())
+		return err
+	}
+
+	operatorID := ctx.MustGet("userID").(string)
+	operatorName := ctx.MustGet("username").(string)
+	if err := s.CreateLog(&model.PermissionOperationLog{
+		OperatorID:   operatorID,
+		OperatorName: operatorName,
+		OperType:     "add iot api perm",
+		OperContent:  fmt.Sprintf("apis：%s", invalidPerms),
+		OperIP:       ctx.ClientIP(),
+		OperResult:   "success",
+	}); err != nil {
+		s.l.Errorf("failed to save oplog, error: %s", err.Error())
+	}
+
+	return nil
+}
+
+func (s *service) DelIotApiPerm(ctx *gin.Context, permId int64) error {
+	if permId == 0 {
+		return errors.New("permID should not be zero")
+	}
+
+	if err := s.db.Model(&model.PermissionIotIdentityApi{}).Where("id  = ?", permId).
+		Delete(&model.PermissionIotIdentityApi{}).Error; err != nil {
+		s.l.Errorf("failed to delete iot api perm: %d, error: %s", permId, err.Error())
+	}
+
+	operatorID := ctx.MustGet("userID").(string)
+	operatorName := ctx.MustGet("username").(string)
+	if err := s.CreateLog(&model.PermissionOperationLog{
+		OperatorID:   operatorID,
+		OperatorName: operatorName,
+		OperType:     "delete iot api perm",
 		OperContent:  fmt.Sprintf("api：%s", permId),
 		OperIP:       ctx.ClientIP(),
 		OperResult:   "success",

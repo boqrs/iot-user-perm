@@ -18,7 +18,7 @@ type Service interface {
 	UpdateApiPerm(ctx *gin.Context, req *UpdateApiPermReq) error
 	DelApiPerm(ctx *gin.Context, permId string) error
 	PermList(ctx *gin.Context, req *ApiPermListReq) (*ApiPermListResp, error)
-	IOTRolePerm(ctx *gin.Context, roleCode string) (*RolePermResp, error)
+	IOTRolePerm(ctx *gin.Context, roleCode string) (*IotRolePermResp, error)
 	IotApiPermBind(ctx *gin.Context, req *BindIotIdentityPermReq) error
 	DelIotApiPerm(ctx *gin.Context, permId int64) error
 }

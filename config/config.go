@@ -15,23 +15,12 @@ type Config struct {
 	Log    config.LogConfig    `toml:"log"`
 	Con    config.SqlConConfig `toml:"sqlCon"`
 	Global GlobalConfig        `toml:"global"`
-	Jp     config.JPushCfg     `toml:"jpush"`
-	Email  Email               `toml:"email"`
-	S3     s3Config            `toml:"s3"`
+	Grpc   GrpcConfig          `toml:"grpc"`
 }
 
-type Email struct {
-	Server   string `toml:"server"`
-	UserName string `toml:"user_name"`
-	Password string `toml:"password"`
-}
-
-type s3Config struct {
-	Endpoint      string `json:"endpoint"`
-	BucketName    string `json:"bucket_name"`
-	RootAccessKey string `json:"root_access_key"`
-	RootSecretKey string `json:"root_secret_key"`
-	ExpireSeconds int64  `json:"expire_seconds"`
+type GrpcConfig struct {
+	Host string `toml:"host"`
+	Port string `toml:"port"`
 }
 
 type GlobalConfig struct {
@@ -47,7 +36,7 @@ func GetConfig() (*Config, error) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	p := filepath.Join(dir, "/config/user.toml")
+	p := filepath.Join(dir, "/config/config.toml")
 	if _, err = toml.DecodeFile(p, &cfg); err != nil {
 		return nil, err
 	}

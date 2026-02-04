@@ -26,7 +26,7 @@ require (
 )
 
 require (
-	github.com/boqrs/comm v0.0.3
+	github.com/boqrs/comm v0.0.6
 	github.com/bytedance/gopkg v0.1.3 // indirect
 	github.com/bytedance/sonic v1.10.0 // indirect
 	github.com/bytedance/sonic/loader v0.3.0 // indirect
@@ -60,7 +60,7 @@ require (
 	golang.org/x/sys v0.39.0 // indirect
 	golang.org/x/text v0.32.0 // indirect
 	golang.org/x/time v0.5.0 // indirect
-	google.golang.org/protobuf v1.31.1-0.20231027082548-f4a6c1f6e5c1 // indirect
+	google.golang.org/protobuf v1.31.1-0.20231027082548-f4a6c1f6e5c1
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 

@@ -1,0 +1,153 @@
+syntax = "proto3";
+
+package iot.permission;
+option go_package = "./iot_permission;iot_permission";
+
+// 权限类型枚举
+enum PermissionType {
+  PERMISSION_TYPE_UNKNOWN = 0; // 未知（默认值）
+  PERMISSION_TYPE_OWNER = 1;   // 设备拥有者
+  PERMISSION_TYPE_VIEW = 2;    // 查看者
+  PERMISSION_TYPE_COMMAND = 3; // 控制者
+}
+
+// 基础响应结构体
+message BaseResponse {
+  bool success = 1;            // 操作是否成功
+  string error_code = 2;       // 错误码（成功为""）
+  string error_msg = 3;        // 错误信息（成功为""）
+}
+
+// 绑定设备请求
+message BindDeviceRequest {
+  string user_id = 1;          // 绑定设备的用户ID
+  string device_id = 2;        // 设备ID
+  string operator_id = 3;      // 操作人ID（仅审计用）
+}
+
+// 解绑设备请求
+message UnbindDeviceRequest {
+  string user_id = 1;          // 解绑设备的用户ID（必须是OWNER）
+  string device_id = 2;        // 设备ID
+  string operator_id = 3;      // 操作人ID（必须=user_id）
+}
+
+// 授权其他用户设备权限请求
+message AuthorizeDevicePermissionRequest {
+  string owner_user_id = 1;    // 授权方ID（必须是设备OWNER）
+  string authorized_user_id = 2; // 被授权方ID
+  string device_id = 3;        // 设备ID
+  PermissionType perm_type = 4; // 授权类型（仅VIEW/COMMAND）
+  string operator_id = 5;      // 操作人ID（必须=owner_user_id）
+}
+
+// 撤销其他用户设备权限请求
+message RevokeDevicePermissionRequest {
+  string owner_user_id = 1;    // 授权方ID（必须是设备OWNER）
+  string authorized_user_id = 2; // 被撤销授权的用户ID
+  string device_id = 3;        // 设备ID
+  PermissionType perm_type = 4; // 撤销的权限类型（VIEW/COMMAND）
+  string operator_id = 5;      // 操作人ID（必须=owner_user_id）
+}
+
+// 查询用户设备权限请求
+message GetDevicePermissionRequest {
+  string user_id = 1;          // 查询的用户ID
+  string device_id = 2;        // 设备ID
+}
+
+// 查询用户设备权限响应
+message GetDevicePermissionResponse {
+  BaseResponse base_resp = 1;  // 基础响应
+  PermissionType perm_type = 2; // 用户对设备的权限（UNKNOWN=无权限）
+}
+
+// 批量删除设备权限请求
+message BatchDeleteDevicePermissionRequest {
+  string device_id = 1;        // 设备ID
+  string operator_id = 2;      // 操作人ID（管理员/OWNER）
+}
+
+// 嵌套：权限-用户列表（解决map值类型不支持repeated的问题）
+message PermUserList {
+  repeated string user_ids = 1; // 同一权限类型的用户ID列表
+}
+
+// 查询设备权限用户列表请求
+message GetDevicePermissionUsersRequest {
+  string device_id = 1;          // 设备ID（必填）
+  bool need_all = 2;             // 是否返回所有用户（true=合并列表，false=按类型分类）
+  repeated PermissionType filter_perm_types = 3; // 权限类型筛选（仅need_all=false时生效）
+}
+
+// 设备权限用户信息
+message DevicePermissionUser {
+  string user_id = 1;            // 用户ID
+  PermissionType perm_type = 2;  // 该用户对设备的权限类型
+}
+
+// 查询设备权限用户列表响应
+message GetDevicePermissionUsersResponse {
+  BaseResponse base_resp = 1;    // 基础响应
+  repeated string all_user_ids = 2; // 所有权限用户ID（need_all=true时返回）
+  // ========== 核心修改：map键从PermissionType改为string ==========
+  map<string, PermUserList> perm_user_map = 3; // 键=枚举字符串（如"PERMISSION_TYPE_OWNER"）
+  repeated DevicePermissionUser user_list = 4; // 完整用户列表（含用户ID+权限类型）
+}
+
+// ========== 新增：批量查询用户的设备列表（按权限类型） ==========
+message BatchGetUserDevicesRequest {
+  string user_id = 1;                          // 用户ID（必填）
+  repeated PermissionType filter_perm_types = 2; // 筛选权限类型（如仅查OWNER+COMMAND）
+  int32 page = 3;                              // 分页页码（默认1）
+  int32 page_size = 4;                         // 分页大小（默认20）
+}
+
+message UserDeviceItem {
+  string device_id = 1;                        // 设备ID
+  PermissionType perm_type = 2;                // 该用户对设备的权限类型
+}
+
+message BatchGetUserDevicesResponse {
+  BaseResponse base_resp = 1;                  // 基础响应
+  repeated UserDeviceItem device_list = 2;     // 用户有权限的设备列表
+  int64 total = 3;                             // 总数量（分页用）
+}
+
+// ========== 新增：批量查询设备的权限信息 ==========
+message BatchGetDevicePermsRequest {
+  repeated string device_ids = 1;              // 设备ID列表（必填）
+  string user_id = 2;                          // 可选：指定用户，仅查该用户对这些设备的权限
+}
+
+message DevicePermItem {
+  string device_id = 1;                        // 设备ID
+  map<string, PermissionType> user_perm_map = 2; // 键=用户ID，值=权限类型（不指定user_id时返回所有）
+  PermissionType user_perm_type = 3;           // 指定user_id时，返回该用户的权限类型
+}
+
+message BatchGetDevicePermsResponse {
+  BaseResponse base_resp = 1;                  // 基础响应
+  repeated DevicePermItem device_perm_list = 2; // 设备权限列表
+}
+
+// gRPC服务定义
+service IoTDevicePermissionService {
+  // 绑定设备（成为OWNER）
+  rpc BindDevice(BindDeviceRequest) returns (BaseResponse);
+  // 解绑设备（删除OWNER权限）
+  rpc UnbindDevice(UnbindDeviceRequest) returns (BaseResponse);
+  // 授权其他用户设备权限
+  rpc AuthorizeDevicePermission(AuthorizeDevicePermissionRequest) returns (BaseResponse);
+  // 撤销其他用户设备权限
+  rpc RevokeDevicePermission(RevokeDevicePermissionRequest) returns (BaseResponse);
+  // 查询用户设备权限
+  rpc GetDevicePermission(GetDevicePermissionRequest) returns (GetDevicePermissionResponse);
+  // 批量删除设备所有权限（设备注销）
+  rpc BatchDeleteDevicePermission(BatchDeleteDevicePermissionRequest) returns (BaseResponse);
+  // 查询设备的所有权限用户列表
+  rpc GetDevicePermissionUsers(GetDevicePermissionUsersRequest) returns (GetDevicePermissionUsersResponse);
+
+  rpc BatchGetUserDevices(BatchGetUserDevicesRequest) returns (BatchGetUserDevicesResponse);
+  rpc BatchGetDevicePerms(BatchGetDevicePermsRequest) returns (BatchGetDevicePermsResponse);
+}

@@ -26,7 +26,7 @@ require (
 )
 
 require (
-	github.com/boqrs/comm v0.0.6
+	github.com/boqrs/comm v0.0.7
 	github.com/bytedance/gopkg v0.1.3 // indirect
 	github.com/bytedance/sonic v1.10.0 // indirect
 	github.com/bytedance/sonic/loader v0.3.0 // indirect

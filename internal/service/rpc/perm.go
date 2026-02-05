@@ -21,6 +21,8 @@ type Service interface {
 	GetDevicePermission(ctx context.Context, req *pb.GetDevicePermissionRequest) (*pb.GetDevicePermissionResponse, error)
 	GetDevicePermissionUsers(ctx context.Context, req *pb.GetDevicePermissionUsersRequest) (*pb.GetDevicePermissionUsersResponse, error)
 	BatchDeleteDevicePermission(ctx context.Context, req *pb.BatchDeleteDevicePermissionRequest) (*pb.BaseResponse, error)
+	BatchGetDevicePerms(ctx context.Context, req *pb.BatchGetDevicePermsRequest) (*pb.BatchGetDevicePermsResponse, error)
+	BatchGetUserDevices(ctx context.Context, req *pb.BatchGetUserDevicesRequest) (*pb.BatchGetUserDevicesResponse, error)
 }
 
 type service struct {
@@ -470,17 +472,17 @@ func (s *service) BatchGetUserDevices(ctx context.Context, req *pb.BatchGetUserD
 	resp := &pb.BatchGetUserDevicesResponse{
 		BaseResp: &pb.BaseResponse{
 			Success:   true,
-			ErrorCode: 0,
+			ErrorCode: "0",
 			ErrorMsg:  "",
 		},
 	}
 
 	// 1. 参数校验
 	if req.UserId == "" {
-		resp.BaseResp = &iot_permission.BaseResponse{
+		resp.BaseResp = &pb.BaseResponse{
 			Success:   false,
-			ErrorCode: 1, // 参数错误
-			ErrorMsg:  "user_id不能为空",
+			ErrorCode: "1", // 参数错误
+			ErrorMsg:  "user_id should not be empty",
 		}
 		return resp, nil
 	}
@@ -494,12 +496,196 @@ func (s *service) BatchGetUserDevices(ctx context.Context, req *pb.BatchGetUserD
 		pageSize = 20
 	}
 	offset := (page - 1) * pageSize
+
+	filterPermStrs := utils.PermTypesToStrings(req.FilterPermTypes)
+
+	// 3. 优先查缓存（用户设备列表）
+	deviceIDs, err := s.dao.SMembersUserDevicesCache(req.UserId)
+	if err != nil {
+		s.log.Warn("Failed to query user device cache", "user_id", req.UserId, "error", err)
+	} else if len(deviceIDs) > 0 {
+		// 缓存命中：刷新缓存过期时间
+		cacheKey := fmt.Sprintf(KeyUserDevices, req.UserId)
+		_ = s.dao.RefreshCache(cacheKey)
+
+		// 3.1 批量查询这些设备的权限类型（筛选+分页）
+		deviceList := make([]*pb.UserDeviceItem, 0, len(deviceIDs))
+		for _, deviceID := range deviceIDs {
+			// 查询单个设备权限
+			permStr, err := s.dao.GetUserDevicePerm(req.UserId, deviceID)
+			if err != nil {
+				s.log.Warn("Failed to query user device permissions", "user_id", req.UserId, "device_id", deviceID, "error", err)
+				continue
+			}
+			permType := utils.StringToPermType(permStr)
+
+			// 筛选权限类型
+			if len(filterPermStrs) > 0 && !containsString(filterPermStrs, permStr) {
+				continue
+			}
+
+			deviceList = append(deviceList, &pb.UserDeviceItem{
+				DeviceId: deviceID,
+				PermType: permType,
+			})
+		}
+
+		// 3.2 分页处理
+		total := int64(len(deviceList))
+		end := offset + pageSize
+		if end > int32(total) {
+			end = int32(total)
+		}
+		if offset < int32(total) {
+			resp.DeviceList = deviceList[offset:end]
+		}
+		resp.Total = total
+		return resp, nil
+	}
+
+	// 4. 缓存未命中：查数据库
+	items, total, err := s.dao.GetUserDeviceList(req.UserId, filterPermStrs, int(offset), int(pageSize))
+	if err != nil {
+		s.log.Error("failed to find user list", "user_id", req.UserId, "error", err)
+		resp.BaseResp = &pb.BaseResponse{
+			Success:   false,
+			ErrorCode: "2", // 数据库错误
+			ErrorMsg:  fmt.Sprintf("query failed: %v", err),
+		}
+		return resp, nil
+	}
+
+	// 5. 组装响应
+	deviceList := make([]*pb.UserDeviceItem, 0, len(items))
+	deviceIDSet := make([]string, 0, len(items)) // 用于缓存
+	for _, item := range items {
+		permType := utils.StringToPermType(item.PermType)
+		deviceList = append(deviceList, &pb.UserDeviceItem{
+			DeviceId: item.DeviceID,
+			PermType: permType,
+		})
+		deviceIDSet = append(deviceIDSet, item.DeviceID)
+	}
+	resp.DeviceList = deviceList
+	resp.Total = total
+
+	// 6. 异步回写缓存（非阻塞，不影响响应）
+	go func() {
+		if err := s.dao.SAddUserDevicesCache(req.UserId, deviceIDSet...); err != nil {
+			s.log.Warn("Failed to write back user device cache", "user_id", req.UserId, "error", err)
+		}
+	}()
+
+	return resp, nil
+
+}
+
+func (s *service) BatchGetDevicePerms(ctx context.Context, req *pb.BatchGetDevicePermsRequest) (*pb.BatchGetDevicePermsResponse, error) {
+	// 初始化响应
+	resp := &pb.BatchGetDevicePermsResponse{
+		BaseResp: &pb.BaseResponse{
+			Success:   true,
+			ErrorCode: "0",
+			ErrorMsg:  "",
+		},
+	}
+
+	// 1. 参数校验
+	if len(req.DeviceIds) == 0 {
+		resp.BaseResp = &pb.BaseResponse{
+			Success:   false,
+			ErrorCode: "1", // 参数错误
+			ErrorMsg:  "device_ids should not be empty",
+		}
+		return resp, nil
+	}
+	if len(req.DeviceIds) > 100 { // 限制批量查询数量，防止性能问题
+		resp.BaseResp = &pb.BaseResponse{
+			Success:   false,
+			ErrorCode: "1",
+			ErrorMsg:  "device_ids must be lower than 100",
+		}
+		return resp, nil
+	}
+
+	// 2. 批量查询数据库
+	devicePermMap, err := s.dao.BatchGetDevicePerms(req.DeviceIds, req.UserId)
+	if err != nil {
+		s.log.Error("批量查询设备权限失败", "device_ids", req.DeviceIds, "user_id", req.UserId, "error", err)
+		resp.BaseResp = &pb.BaseResponse{
+			Success:   false,
+			ErrorCode: "2", // 数据库错误
+			ErrorMsg:  fmt.Sprintf("查询失败: %v", err),
+		}
+		return resp, nil
+	}
+
+	// 3. 组装响应
+	devicePermList := make([]*pb.DevicePermItem, 0, len(req.DeviceIds))
+	for _, deviceID := range req.DeviceIds {
+		item := &pb.DevicePermItem{DeviceId: deviceID}
+		permItems, ok := devicePermMap[deviceID]
+
+		if !ok {
+			// 该设备无权限记录
+			item.UserPermType = pb.PermissionType_PERMISSION_TYPE_UNKNOWN
+			devicePermList = append(devicePermList, item)
+			continue
+		}
+
+		if req.UserId != "" {
+			// 3.1 指定用户：返回该用户的权限类型
+			item.UserPermType = pb.PermissionType_PERMISSION_TYPE_UNKNOWN
+			for _, permItem := range permItems {
+				if permItem.UserID == req.UserId {
+					item.UserPermType = utils.StringToPermType(permItem.PermType)
+					break
+				}
+			}
+		} else {
+			// 3.2 未指定用户：返回所有用户-权限映射
+			userPermMap := make(map[string]pb.PermissionType)
+			for _, permItem := range permItems {
+				userPermMap[permItem.UserID] = utils.StringToPermType(permItem.PermType)
+			}
+			item.UserPermMap = userPermMap
+
+			// 异步回写缓存
+			go func(dID string, upMap map[string]pb.PermissionType) {
+				// 转换为字符串map
+				strMap := make(map[string]interface{})
+				for uid, pt := range upMap {
+					strMap[uid] = utils.PermTypeToString(pt)
+				}
+				if err := s.dao.HSetDevicePermsCache(dID, strMap); err != nil {
+					s.log.Warn("Failed to write back device permission cache", "device_id", dID, "error", err)
+				}
+			}(deviceID, userPermMap)
+		}
+
+		devicePermList = append(devicePermList, item)
+	}
+
+	resp.DevicePermList = devicePermList
+	return resp, nil
+
 }
 
 // ========== 辅助函数：判断权限类型是否在筛选列表中 ==========
 func containsPermType(filter []pb.PermissionType, target pb.PermissionType) bool {
 	for _, pt := range filter {
 		if pt == target {
+			return true
+		}
+	}
+	return false
+}
+
+// ========== 辅助函数 ==========
+// containsString 检查字符串是否在列表中
+func containsString(list []string, str string) bool {
+	for _, s := range list {
+		if s == str {
 			return true
 		}
 	}

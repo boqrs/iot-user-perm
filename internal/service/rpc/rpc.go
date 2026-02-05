@@ -54,3 +54,13 @@ func (s *GRPCServer) BatchDeleteDevicePermission(ctx context.Context, req *pb.Ba
 func (s *GRPCServer) GetDevicePermissionUsers(ctx context.Context, req *pb.GetDevicePermissionUsersRequest) (*pb.GetDevicePermissionUsersResponse, error) {
 	return s.srv.GetDevicePermissionUsers(ctx, req)
 }
+
+// ========== 8. 批量查询用户的设备列表 ==========
+func (s *GRPCServer) BatchGetUserDevices(ctx context.Context, req *pb.BatchGetUserDevicesRequest) (*pb.BatchGetUserDevicesResponse, error) {
+	return s.srv.BatchGetUserDevices(ctx, req)
+}
+
+// ========== 8. 批量查询设备的权限 ==========
+func (s *GRPCServer) BatchGetDevicePerms(ctx context.Context, req *pb.BatchGetDevicePermsRequest) (*pb.BatchGetDevicePermsResponse, error) {
+	return s.srv.BatchGetDevicePerms(ctx, req)
+}

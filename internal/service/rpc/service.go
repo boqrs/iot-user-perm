@@ -506,7 +506,6 @@ func (c *daoService) HGetDevicePerms(deviceID string) (map[string]string, error)
 	key := fmt.Sprintf(KeyDevicePermUsersHash, deviceID)
 	return c.cache.HGetAll(key)
 }
-
 func (s *daoService) RefreshCache(key string) error {
 	return s.cache.Expire(key, time.Hour*24) //TODO：need fix
 }

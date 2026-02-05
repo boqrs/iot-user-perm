@@ -45,3 +45,29 @@ func SplitUserIDs(userIDsStr string) []string {
 	}
 	return strings.Split(userIDsStr, ",")
 }
+
+// StringToPermType 将字符串（OWNER/COMMAND/VIEWER）转换为gRPC枚举
+func StringToPermType(permStr string) pb.PermissionType {
+	switch permStr {
+	case "OWNER":
+		return pb.PermissionType_PERMISSION_TYPE_OWNER
+	case "COMMAND":
+		return pb.PermissionType_PERMISSION_TYPE_COMMAND
+	case "VIEWER":
+		return pb.PermissionType_PERMISSION_TYPE_VIEW
+	default:
+		return pb.PermissionType_PERMISSION_TYPE_UNKNOWN
+	}
+}
+
+// PermTypesToStrings 将gRPC枚举列表转换为字符串列表
+func PermTypesToStrings(permTypes []pb.PermissionType) []string {
+	strs := make([]string, 0, len(permTypes))
+	for _, pt := range permTypes {
+		str := PermTypeToString(pt)
+		if str != "" {
+			strs = append(strs, str)
+		}
+	}
+	return strs
+}

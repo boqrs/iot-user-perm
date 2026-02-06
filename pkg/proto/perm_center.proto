@@ -1,0 +1,369 @@
+syntax = "proto3";
+package iot.permission;
+option go_package = "./proto;perm_proto";
+
+// ========== 全局枚举（仅权限中心维护，纯权限相关）==========
+// 设备权限类型（与你的PermissionIotDeviceUser.PermType完全一致）
+enum DevicePermType {
+  DEVICE_PERM_UNKNOWN = 0;
+  DEVICE_PERM_OWNER = 1;    // 拥有者（最高权限）
+  DEVICE_PERM_VIEW = 2;     // 查看者（仅查看）
+  DEVICE_PERM_COMMAND = 3;  // 操作员（可操作，不可授权/解绑）
+}
+
+// HTTP请求方法（与你的PermissionApi.ApiMethod完全一致）
+enum HttpMethod {
+  HTTP_METHOD_UNKNOWN = 0;
+  HTTP_METHOD_GET = 1;
+  HTTP_METHOD_POST = 2;
+  HTTP_METHOD_PUT = 3;
+  HTTP_METHOD_DELETE = 4;
+}
+// 操作结果（与你的PermissionOperationLog.OperResult完全一致）
+enum OperResult {
+  OPER_RESULT_UNKNOWN = 0;
+  OPER_RESULT_SUCCESS = 1;  // 成功
+  OPER_RESULT_FAIL = 2;     // 失败
+}
+// 操作类型（与你的PermissionOperationLog.OperType完全一致，覆盖所有权限操作）
+enum OperType {
+  OPER_TYPE_UNKNOWN = 0;
+  // 设备权限操作（对应你原有接口）
+  OPER_TYPE_BIND_DEVICE = 1;
+  OPER_TYPE_UNBIND_DEVICE = 2;
+  OPER_TYPE_AUTHORIZE_DEVICE = 3;
+  OPER_TYPE_REVOKE_DEVICE = 4;
+  OPER_TYPE_BATCH_DELETE_DEVICE_PERM = 5;
+  // API/角色权限操作（管理后台新增）
+  OPER_TYPE_ADD_API = 6;
+  OPER_TYPE_UPDATE_API = 7;
+  OPER_TYPE_DELETE_API = 8;
+  OPER_TYPE_ADD_ROLE = 9;
+  OPER_TYPE_UPDATE_ROLE = 10;
+  OPER_TYPE_DELETE_ROLE = 11;
+  OPER_TYPE_BIND_ROLE_API = 12;
+  OPER_TYPE_UNBIND_ROLE_API = 13;
+}
+
+// ========== 基础响应（纯权限层面，独立定义）==========
+message BaseResponse {
+  bool success = 1;          // 接口调用是否成功
+  int32 code = 2;            // 业务错误码：0=成功，1=参数错误，2=无权限，3=资源不存在，4=数据库错误，5=服务内部错误
+  string msg = 3;            // 错误信息
+  string request_id = 4;     // 请求ID（链路追踪，与业务方/用户中心保持一致）
+}
+
+// ========== 1. 你原有9个设备权限接口（100%保留，参数/响应仅做标准化，无核心修改）==========
+// 1.1 绑定设备（BindDevice）
+message BindDeviceRequest {
+  string operator_user_id = 1;  // 操作人UserID（业务方已校验，权限中心仅记录日志）
+  string operator_name = 2;     // 操作人名称（业务方从用户中心获取，传入后权限中心直接记录，无需自己查）
+  string oper_ip = 3;           // 操作IP（日志用）
+  string user_id = 4;           // 被绑定用户UserID（设备拥有者，业务方已校验）
+  string device_id = 5;         // 设备ID
+}
+// 1.2 解绑设备（UnbindDevice）
+message UnbindDeviceRequest {
+  string operator_user_id = 1;
+  string operator_name = 2;
+  string oper_ip = 3;
+  string user_id = 4;           // 原拥有者UserID（业务方已校验）
+  string device_id = 5;         // 设备ID
+  DevicePermType perm_type = 6; // 授权权限类型（非OWNER）
+}
+// 1.3 授权其他用户设备权限（AuthorizeDevicePermission）
+message AuthorizeDevicePermissionRequest {
+  string operator_user_id = 1;
+  string operator_name = 2;
+  string oper_ip = 3;
+  string target_user_id = 4;    // 被授权用户UserID（业务方已校验）
+  string device_id = 5;         // 设备ID
+  DevicePermType perm_type = 6; // 授权权限类型（非OWNER）
+}
+// 1.4 撤销其他用户设备权限（RevokeDevicePermission）
+message RevokeDevicePermissionRequest {
+  string operator_user_id = 1;
+  string operator_name = 2;
+  string oper_ip = 3;
+  string target_user_id = 4;    // 被撤销用户UserID（业务方已校验）
+  string device_id = 5;         // 设备ID
+  DevicePermType perm_type = 6; // 授权权限类型（非OWNER）
+}
+// 1.5 查询用户设备权限（GetDevicePermission）
+message GetDevicePermissionRequest {
+  string user_id = 1;           // 用户ID（业务方已校验）
+  string device_id = 2;         // 设备ID
+}
+message GetDevicePermissionResponse {
+  BaseResponse base_resp = 1;
+  DevicePermType perm_type = 2; // 用户对该设备的权限类型（无则为UNKNOWN）
+  int64 create_time = 3;        // 权限创建时间（时间戳）
+}
+// 1.6 批量删除设备所有权限（BatchDeleteDevicePermission）
+message BatchDeleteDevicePermissionRequest {
+  string operator_user_id = 1;
+  string operator_name = 2;
+  string oper_ip = 3;
+  string device_id = 4;         // 设备ID
+}
+
+message PageRequest {
+  int32 page = 1;    // 页码，从1开始
+  int32 size = 2;    // 页大小，默认10，最大50
+  string keyword = 3;// 模糊搜索关键字
+}
+
+// 1.7 查询设备的所有权限用户列表（GetDevicePermissionUsers）
+message GetDevicePermissionUsersRequest {
+  string device_id = 1;         // 设备ID
+  int32 page = 2;               // 页码，默认1
+  int32 page_size = 3;          // 页大小，默认20
+  bool need_all = 4; // 是否返回所有用户（true=合并列表，false=按类型分类）
+  repeated DevicePermType filter_perm_types = 5; // 权限类型筛选（仅need_all=false时生效）
+}
+message DevicePermissionUserItem {
+  string user_id = 1;           // 用户ID
+  DevicePermType perm_type = 2; // 权限类型
+  int64 create_time = 3;        // 创建时间
+}
+
+message PermUserList {
+  repeated string user_ids = 1; // 同一权限类型的用户ID列表
+}
+
+message DevicePermissionUser {
+  string user_id = 1;            // 用户ID
+  DevicePermType perm_type = 2;  // 该用户对设备的权限类型
+}
+
+message GetDevicePermissionUsersResponse {
+  BaseResponse base_resp = 1;
+  repeated string all_user_ids = 2; // 所有权限用户ID（need_all=true时返回）
+  map<string, PermUserList> perm_user_map = 3; // 键=枚举字符串（如"PERMISSION_TYPE_OWNER"）
+  repeated DevicePermissionUser user_list = 4; // 完整用户列表（含用户ID+权限类型）
+}
+// 1.8 批量查询用户的设备列表（BatchGetUserDevices）
+message BatchGetUserDevicesRequest {
+  string user_id = 1;                   // 用户ID（业务方已校验）
+  repeated DevicePermType perm_types = 2; // 按权限类型筛选，空则查所有
+  int32 page = 3;
+  int32 page_size = 4;
+}
+message UserDeviceItem {
+  string device_id = 1;
+  DevicePermType perm_type = 2;
+  int64 create_time = 3;
+}
+message BatchGetUserDevicesResponse {
+  BaseResponse base_resp = 1;
+  int64 total = 2;
+  repeated UserDeviceItem device_list = 3; // 用户有权限的设备列表
+}
+// 1.9 批量查询设备的权限（BatchGetDevicePerms）
+message BatchGetDevicePermsRequest {
+  string user_id = 1;                          // 可选：指定用户，仅查该用户对这些设备的权限
+  repeated string device_ids = 2; // 设备ID列表（最多100个）
+}
+message DevicePermItem {
+  string device_id = 1;
+  map<string, DevicePermType> user_perm_map = 2; // key=UserID, value=权限类型
+  DevicePermType user_perm_type = 3;           // 指定user_id时，返回该用户的权限类型
+}
+message BatchGetDevicePermsResponse {
+  BaseResponse base_resp = 1;
+  repeated DevicePermItem device_perm_list = 2; // 设备权限列表
+
+}
+
+// ========== 2. 新增：API权限管理接口（4个，管理后台服务调用）==========
+// API权限信息（与你的PermissionApi完全一致）
+message ApiPermInfo {
+  string perm_id = 1;        // 权限ID（主键，如perm_iot_device_control）
+  string perm_name = 2;      // 权限名称（如：IoT设备控制）
+  string api_path = 4;       // API路径（如：/api/iot/device/control）
+  HttpMethod api_method = 5; // HTTP方法
+  string remark = 6;         // 备注
+}
+// 新增API权限
+message AddApiPermRequest {
+  string operator_user_id = 1;
+  string operator_name = 2;
+  string oper_ip = 3;
+  ApiPermInfo api_perm = 4;  // API权限信息
+}
+// 更新API权限
+message UpdateApiPermRequest {
+  string operator_user_id = 1;
+  string operator_name = 2;
+  string oper_ip = 3;
+  ApiPermInfo api_perm = 4;  // perm_id为唯一标识，不可修改
+}
+// 删除API权限
+message DeleteApiPermRequest {
+  string operator_user_id = 1;
+  string operator_name = 2;
+  string oper_ip = 3;
+  string perm_id = 4;        // 权限ID
+}
+// 分页查询API权限
+message ListApiPermRequest {
+  string keyword = 1;        // 权限名称/路径模糊搜索
+  PageRequest page = 3;
+}
+message ListApiPermResponse {
+  BaseResponse base_resp = 1;
+  int64 total = 2;
+  repeated ApiPermInfo api_perm_list = 3;
+}
+
+// ========== 3. 新增：角色管理接口（7个，管理后台服务调用）==========
+// 角色信息（与你的PermissionRole完全一致）
+message RoleInfo {
+  string role_code = 1;      // 角色编码（主键，如SUPER_ADMIN/IOT_OWNER）
+  string role_name = 2;      // 角色名称（如：超级管理员/设备拥有者）
+  string remark = 3;         // 备注
+}
+// 新增角色
+message AddRoleRequest {
+  string operator_user_id = 1;
+  string operator_name = 2;
+  string oper_ip = 3;
+  RoleInfo role = 4;         // 角色信息
+}
+// 更新角色
+message UpdateRoleRequest {
+  string operator_user_id = 1;
+  string operator_name = 2;
+  string oper_ip = 3;
+  RoleInfo role = 4;         // role_code为唯一标识，不可修改
+}
+// 删除角色
+message DeleteRoleRequest {
+  string operator_user_id = 1;
+  string operator_name = 2;
+  string oper_ip = 3;
+  string role_code = 4;      // 角色编码
+}
+// 分页查询角色
+message ListRoleRequest {
+  string keyword = 1;        // 角色编码/名称模糊搜索
+  PageRequest page = 2;
+}
+message ListRoleResponse {
+  BaseResponse base_resp = 1;
+  int64 total = 2;
+  repeated RoleInfo role_list = 3;
+}
+// 角色绑定API权限
+message BindRoleApiRequest {
+  string operator_user_id = 1;
+  string operator_name = 2;
+  string oper_ip = 3;
+  string role_code = 4;      // 角色编码
+  repeated string perm_ids = 5; // API权限ID列表
+}
+// 角色解绑API权限
+message UnbindRoleApiRequest {
+  string operator_user_id = 1;
+  string operator_name = 2;
+  string oper_ip = 3;
+  string role_code = 4;      // 角色编码
+  repeated string perm_ids = 5; // API权限ID列表
+}
+// 查询角色绑定的API权限
+message ListRoleApiRequest {
+  string role_code = 1;      // 角色编码
+  PageRequest page = 2;
+}
+message ListRoleApiResponse {
+  BaseResponse base_resp = 1;
+  int64 total = 2;
+  repeated ApiPermInfo api_perm_list = 3;
+}
+
+// ========== 4. 新增：操作日志查询接口（1个，管理后台服务调用）==========
+// 操作日志项（与你的PermissionOperationLog完全一致）
+message OperLogItem {
+  string log_id = 1;
+  string operator_id = 2;
+  string operator_name = 3;
+  OperType oper_type = 4;
+  string oper_content = 5;
+  string oper_ip = 6;
+  OperResult oper_result = 7;
+  string error_msg = 8;
+  int64 create_time = 9;
+}
+// 分页查询操作日志
+message ListOperLogRequest {
+  string operator_id = 1;    // 按操作人UserID筛选
+  OperType oper_type = 2;    // 按操作类型筛选
+  OperResult oper_result = 3;// 按操作结果筛选
+  string start_time = 4;      // 开始时间（时间戳）
+  string end_time = 5;        // 结束时间（时间戳）
+  PageRequest page = 6;
+}
+message ListOperLogResponse {
+  BaseResponse base_resp = 1;
+  int64 total = 2;
+  repeated OperLogItem log_list = 3;
+}
+
+// ========== 5. 新增：核心权限校验接口（2个，业务服务/API网关调用）==========
+// 设备权限校验（所有设备操作前，业务服务调用）
+message CheckDevicePermRequest {
+  string user_id = 1;        // 用户ID（业务方已校验）
+  string device_id = 2;      // 设备ID
+  DevicePermType require_perm = 3; // 所需的最小权限类型（如：需要COMMAND权限）
+}
+message CheckDevicePermResponse {
+  BaseResponse base_resp = 1;
+  bool has_perm = 2;         // 是否拥有所需权限
+  DevicePermType current_perm = 3; // 用户当前的权限类型（无则为UNKNOWN）
+}
+// API权限校验（所有API访问前，API网关调用）
+message CheckApiPermRequest {
+  string role_code = 1;      // 用户角色编码（业务方从用户中心/自身存储获取）
+  string api_path = 2;       // API路径
+  HttpMethod api_method = 3; // HTTP方法
+}
+message CheckApiPermResponse {
+  BaseResponse base_resp = 1;
+  bool has_perm = 2;         // 该角色是否拥有API访问权限
+}
+
+// ========== 权限中心gRPC服务（100%保留你原有9个接口 + 新增14个接口，纯权限能力）==========
+service PermissionCenterService {
+  // 【原有9个设备权限接口】100%保留
+  rpc BindDevice(BindDeviceRequest) returns (BaseResponse);
+  rpc UnbindDevice(UnbindDeviceRequest) returns (BaseResponse);
+  rpc AuthorizeDevicePermission(AuthorizeDevicePermissionRequest) returns (BaseResponse);
+  rpc RevokeDevicePermission(RevokeDevicePermissionRequest) returns (BaseResponse);
+  rpc GetDevicePermission(GetDevicePermissionRequest) returns (GetDevicePermissionResponse);
+  rpc BatchDeleteDevicePermission(BatchDeleteDevicePermissionRequest) returns (BaseResponse);
+  rpc GetDevicePermissionUsers(GetDevicePermissionUsersRequest) returns (GetDevicePermissionUsersResponse);
+  rpc BatchGetUserDevices(BatchGetUserDevicesRequest) returns (BatchGetUserDevicesResponse);
+  rpc BatchGetDevicePerms(BatchGetDevicePermsRequest) returns (BatchGetDevicePermsResponse);
+
+  // 【新增4个API权限管理接口】
+  rpc AddApiPerm(AddApiPermRequest) returns (BaseResponse);
+  rpc UpdateApiPerm(UpdateApiPermRequest) returns (BaseResponse);
+  rpc DeleteApiPerm(DeleteApiPermRequest) returns (BaseResponse);
+  rpc ListApiPerm(ListApiPermRequest) returns (ListApiPermResponse);
+
+  // 【新增7个角色管理接口】
+  rpc AddRole(AddRoleRequest) returns (BaseResponse);
+  rpc UpdateRole(UpdateRoleRequest) returns (BaseResponse);
+  rpc DeleteRole(DeleteRoleRequest) returns (BaseResponse);
+  rpc ListRole(ListRoleRequest) returns (ListRoleResponse);
+  rpc BindRoleApi(BindRoleApiRequest) returns (BaseResponse);
+  rpc UnbindRoleApi(UnbindRoleApiRequest) returns (BaseResponse);
+  rpc ListRoleApi(ListRoleApiRequest) returns (ListRoleApiResponse);
+
+  // 【新增1个操作日志查询接口】
+  rpc ListOperLog(ListOperLogRequest) returns (ListOperLogResponse);
+
+  // 【新增2个核心权限校验接口】
+  rpc CheckDevicePerm(CheckDevicePermRequest) returns (CheckDevicePermResponse);
+  rpc CheckApiPerm(CheckApiPermRequest) returns (CheckApiPermResponse);
+}
